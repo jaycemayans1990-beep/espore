@@ -10,127 +10,51 @@ if _G.SnyX_Connection then
     _G.SnyX_Connection:Disconnect() 
     _G.SnyX_Connection = nil
 end
+_G.SnyX_AutoCollect = false
 
 local oldUI = LocalPlayer:WaitForChild("PlayerGui"):FindFirstChild("SnyX_ESP_GUI")
 if oldUI then oldUI:Destroy() end
 
 local HIGHLIGHT_NAME = "SnyX_ItemHighlight"
 
-local function cleanESP()
+local function cleanHighlights()
     for _, desc in ipairs(Workspace:GetDescendants()) do
         if desc.Name == HIGHLIGHT_NAME then
             desc:Destroy()
         end
     end
 end
-cleanESP()
+cleanHighlights()
 
 -- =========================================================
 -- [ CONFIG & LOGIC ]
 -- =========================================================
 local ESPEnabled = false
-local FILL_COLOR = Color3.fromRGB(255, 215, 0) -- สีทองสำหรับของหายาก/ราคาสูง
+local FILL_COLOR = Color3.fromRGB(255, 0, 0)
 local OUTLINE_COLOR = Color3.fromRGB(255, 255, 255)
 
--- คีย์เวิร์ดระบุของหายากและราคาสูง (Rare & High Value Keywords)
-local RARE_KEYWORDS = {
-    "legendary", "mythic", "exotic", "secret", "divine", "celestial", "godly",
-    "diamond", "ruby", "emerald", "sapphire", "crystal", "void", "cosmic",
-    "ancient", "huge", "titanium", "gold", "plat", "obsidian", "rainbow",
-    "rare", "epic", "relic", "artifact", "chest", "gem"
-}
-
--- คีย์เวิร์ดของทั่วไปที่ต้องการตัดออก (Common / Trash Keywords)
-local COMMON_KEYWORDS = {
-    "dirt", "stone", "rock", "coal", "copper", "iron", "sand", "gravel", "wood", "common"
-}
-
--- ตรวจสอบว่าเป็น Character ของผู้เล่น
-local function isAnyPlayerCharacter(object)
-    local model = object:FindFirstAncestorOfClass("Model")
-    if model and Players:GetPlayerFromCharacter(model) then
-        return true
-    end
-    return false
-end
-
--- ตรวจสอบว่าเป็น NPC หรือร้านค้า
-local function isNPCorShop(object)
-    local model = object:FindFirstAncestorOfClass("Model")
-    if model then
-        if model:FindFirstChildOfClass("Humanoid") then
-            return true
-        end
-        local lowerName = model.Name:lower()
-        if lowerName:find("npc") or lowerName:find("shop") or lowerName:find("merchant") or lowerName:find("vendor") or lowerName:find("seller") then
-            return true
-        end
-    end
-    return false
-end
-
--- ตรวจสอบว่าเป็นของราคาสูง/หายาก เท่านั้น
-local function isHighValueItem(object)
+-- ตรวจสอบว่าเป็นไอเทมในเกม (และข้ามตัวละครผู้เล่นเอง)
+local function isTargetItem(object)
     if not object or not object.Parent then return false end
-    if isAnyPlayerCharacter(object) then return false end
-    if isNPCorShop(object) then return false end
-
-    local name = object.Name:lower()
-    local parentName = object.Parent and object.Parent.Name:lower() or ""
-    local fullName = name .. " " .. parentName
-
-    -- ข้ามของระดับธรรมดา/ขยะ
-    for _, common in ipairs(COMMON_KEYWORDS) do
-        if name == common or parentName == common then
-            return false
-        end
-    end
-
-    -- 1. ตรวจสอบจาก Attribute / Value ในตัววัตถุ (ถ้ามี)
-    local rarityAttr = object:GetAttribute("Rarity") or object:GetAttribute("Value") or object:GetAttribute("Tier")
-    if rarityAttr then
-        local rStr = tostring(rarityAttr):lower()
-        if rStr:find("legend") or rStr:find("myth") or rStr:find("exic") or rStr:find("rare") or rStr:find("secret") then
-            return true
-        end
-    end
-
-    local valueObj = object:FindFirstChild("Value") or object:FindFirstChild("Rarity") or object:FindFirstChild("Price")
-    if valueObj and (valueObj:IsA("IntValue") or valueObj:IsA("NumberValue")) and valueObj.Value > 500 then
+    if LocalPlayer.Character and object:IsDescendantOf(LocalPlayer.Character) then return false end
+    
+    if object:IsA("Tool") or object:IsA("TouchTransmitter") or object:IsA("ProximityPrompt") then
         return true
     end
-
-    -- 2. ตรวจสอบชื่อวัตถุตรงกับคีย์เวิร์ดของหายาก
-    for _, kw in ipairs(RARE_KEYWORDS) do
-        if fullName:find(kw) then
-            return true
-        end
-    end
-
-    -- 3. ตรวจสอบ ProximityPrompt ที่เป็นของหายาก
-    if object:IsA("ProximityPrompt") then
-        local action = (object.ActionText .. " " .. object.ObjectText):lower()
-        for _, kw in ipairs(RARE_KEYWORDS) do
-            if action:find(kw) then
-                return true
-            end
-        end
-    end
-
     return false
 end
 
--- แสดงผล Highlight สำหรับของหายากเท่านั้น
+-- แสดงผล ESP
 local function applyESP(object)
     if not ESPEnabled then return end
-    local target = object:IsA("Tool") and object or (object:IsA("BasePart") and object or object.Parent)
-    if not target or not target:IsA("PVInstance") then return end
-
-    if not target:FindFirstChild(HIGHLIGHT_NAME) then
+    local target = object:IsA("Tool") and object or object.Parent
+    if target and target:IsA("PVInstance") and not target:FindFirstChild(HIGHLIGHT_NAME) then
+        if LocalPlayer.Character and target:IsDescendantOf(LocalPlayer.Character) then return end
+        
         local highlight = Instance.new("Highlight")
         highlight.Name = HIGHLIGHT_NAME
         highlight.FillColor = FILL_COLOR
-        highlight.FillTransparency = 0.3
+        highlight.FillTransparency = 0.5
         highlight.OutlineColor = OUTLINE_COLOR
         highlight.OutlineTransparency = 0
         highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
@@ -141,20 +65,55 @@ end
 local function toggleESP(state)
     ESPEnabled = state
     if not state then
-        cleanESP()
+        cleanHighlights()
     end
 end
 
--- =========================================================
--- [ MAIN SCAN LOOP ]
--- =========================================================
+-- ระบบ Auto Collect รองรับทั้ง Touch และ ProximityPrompt
+local function collectItem(desc)
+    local character = LocalPlayer.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+
+    if desc:IsA("TouchTransmitter") and desc.Parent then
+        local targetPart = desc.Parent
+        if firetouchinterest then
+            firetouchinterest(root, targetPart, 0)
+            task.wait(0.01)
+            firetouchinterest(root, targetPart, 1)
+        else
+            targetPart.CFrame = root.CFrame
+        end
+    elseif desc:IsA("ProximityPrompt") then
+        if fireproximityprompt then
+            fireproximityprompt(desc)
+        end
+    elseif desc:IsA("Tool") and desc:FindFirstChild("Handle") then
+        local handle = desc.Handle
+        local transmitter = handle:FindFirstChildOfClass("TouchTransmitter")
+        if firetouchinterest and transmitter then
+            firetouchinterest(root, handle, 0)
+            task.wait(0.01)
+            firetouchinterest(root, handle, 1)
+        else
+            handle.CFrame = root.CFrame
+        end
+    end
+end
+
+-- ลูปสแกนหลักแบบเจาะลึกทุกระดับชั้น (GetDescendants)
 task.spawn(function()
     while true do
-        task.wait(0.4)
-        if ESPEnabled then
+        task.wait(0.5)
+        if ESPEnabled or _G.SnyX_AutoCollect then
             for _, desc in ipairs(Workspace:GetDescendants()) do
-                if isHighValueItem(desc) then
-                    applyESP(desc)
+                if isTargetItem(desc) then
+                    if ESPEnabled then
+                        applyESP(desc)
+                    end
+                    if _G.SnyX_AutoCollect then
+                        collectItem(desc)
+                    end
                 end
             end
         end
@@ -170,7 +129,7 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 220, 0, 150)
+MainFrame.Size = UDim2.new(0, 220, 0, 200)
 MainFrame.Position = UDim2.new(0.1, 0, 0.4, 0)
 MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 MainFrame.BorderSizePixel = 0
@@ -192,9 +151,9 @@ local TitleText = Instance.new("TextLabel")
 TitleText.Size = UDim2.new(0.7, 0, 1, 0)
 TitleText.Position = UDim2.new(0.05, 0, 0, 0)
 TitleText.BackgroundTransparency = 1
-TitleText.Text = "SnyX LITE v7.2 (RARE ONLY)"
-TitleText.TextColor3 = Color3.fromRGB(255, 215, 0)
-TitleText.TextSize = 12
+TitleText.Text = "SnyX LITE v3"
+TitleText.TextColor3 = Color3.fromRGB(255, 255, 255)
+TitleText.TextSize = 13
 TitleText.Font = Enum.Font.SourceSansBold
 TitleText.TextXAlignment = Enum.TextXAlignment.Left
 TitleText.Parent = TitleBar
@@ -214,18 +173,24 @@ ContentFrame.BackgroundTransparency = 1
 ContentFrame.Parent = MainFrame
 
 local ToggleButton = Instance.new("TextButton")
-ToggleButton.Size = UDim2.new(0.9, 0, 0, 40)
-ToggleButton.Position = UDim2.new(0.05, 0, 0.12, 0)
+ToggleButton.Size = UDim2.new(0.9, 0, 0, 35)
+ToggleButton.Position = UDim2.new(0.05, 0, 0.1, 0)
 ToggleButton.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
-ToggleButton.Text = "RARE ESP: OFF"
+ToggleButton.Text = "ESP: OFF"
 ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-ToggleButton.Font = Enum.Font.SourceSansBold
-ToggleButton.TextSize = 14
 ToggleButton.Parent = ContentFrame
 
+local CollectButton = Instance.new("TextButton")
+CollectButton.Size = UDim2.new(0.9, 0, 0, 35)
+CollectButton.Position = UDim2.new(0.05, 0, 0.4, 0)
+CollectButton.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+CollectButton.Text = "AUTO COLLECT: OFF"
+CollectButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+CollectButton.Parent = ContentFrame
+
 local UnloadButton = Instance.new("TextButton")
-UnloadButton.Size = UDim2.new(0.9, 0, 0, 32)
-UnloadButton.Position = UDim2.new(0.05, 0, 0.58, 0)
+UnloadButton.Size = UDim2.new(0.9, 0, 0, 30)
+UnloadButton.Position = UDim2.new(0.05, 0, 0.72, 0)
 UnloadButton.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 UnloadButton.Text = "🔴 UNLOAD SCRIPT"
 UnloadButton.TextColor3 = Color3.fromRGB(255, 100, 100)
@@ -237,12 +202,19 @@ UnloadButton.Parent = ContentFrame
 ToggleButton.MouseButton1Click:Connect(function()
     local newState = not ESPEnabled
     toggleESP(newState)
-    ToggleButton.Text = newState and "RARE ESP: ON" or "RARE ESP: OFF"
+    ToggleButton.Text = newState and "ESP: ON" or "ESP: OFF"
     ToggleButton.BackgroundColor3 = newState and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(150, 50, 50)
+end)
+
+CollectButton.MouseButton1Click:Connect(function()
+    _G.SnyX_AutoCollect = not _G.SnyX_AutoCollect
+    CollectButton.Text = _G.SnyX_AutoCollect and "AUTO COLLECT: ON" or "AUTO COLLECT: OFF"
+    CollectButton.BackgroundColor3 = _G.SnyX_AutoCollect and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(150, 50, 50)
 end)
 
 UnloadButton.MouseButton1Click:Connect(function()
     toggleESP(false)
+    _G.SnyX_AutoCollect = false
     ScreenGui:Destroy()
 end)
 
@@ -250,5 +222,5 @@ local IsCollapsed = false
 FoldButton.MouseButton1Click:Connect(function()
     IsCollapsed = not IsCollapsed
     ContentFrame.Visible = not IsCollapsed
-    TweenService:Create(MainFrame, TweenInfo.new(0.15), {Size = IsCollapsed and UDim2.new(0, 220, 0, 30) or UDim2.new(0, 220, 0, 150)}):Play()
+    TweenService:Create(MainFrame, TweenInfo.new(0.15), {Size = IsCollapsed and UDim2.new(0, 220, 0, 30) or UDim2.new(0, 220, 0, 200)}):Play()
 end)
