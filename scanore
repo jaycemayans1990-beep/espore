@@ -30,17 +30,25 @@ cleanHighlights()
 -- [ CONFIG & LOGIC ]
 -- =========================================================
 local ESPEnabled = false
+local MAX_PULL_DISTANCE = 60 -- ระยะดูดสูงสุด (บล็อก) เพื่อป้องกันเซิร์ฟเวอร์ดึงตัวละครวาป
 local FILL_COLOR = Color3.fromRGB(255, 0, 0)
 local OUTLINE_COLOR = Color3.fromRGB(255, 255, 255)
 
-local function isAnyPlayerCharacter(object)
-    local model = object:FindFirstAncestorOfClass("Model")
-    if model and Players:GetPlayerFromCharacter(model) then
-        return true
+-- ตรวจสอบว่าวัตถุอยู่ในตัวผู้เล่นคนใดคนหนึ่ง หรืออยู่ใน Backpack หรือไม่
+local function isInsideAnyCharacterOrBackpack(object)
+    if not object then return true end
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.Character and object:IsDescendantOf(player.Character) then
+            return true
+        end
+        if player:FindFirstChild("Backpack") and object:IsDescendantOf(player.Backpack) then
+            return true
+        end
     end
     return false
 end
 
+-- ตรวจสอบว่าเป็น NPC หรือร้านค้า
 local function isNPCorShop(object)
     local model = object:FindFirstAncestorOfClass("Model")
     if model then
@@ -55,10 +63,10 @@ local function isNPCorShop(object)
     return false
 end
 
--- ตรวจสอบว่าเป็นไอเทมที่หล่นอยู่จริง
+-- ตรวจสอบว่าเป็นไอเทมเป้าหมายที่อยู่บนพื้น
 local function isTargetItem(object)
     if not object or not object.Parent then return false end
-    if isAnyPlayerCharacter(object) then return false end
+    if isInsideAnyCharacterOrBackpack(object) then return false end
     if isNPCorShop(object) then return false end
     
     if object:IsA("ProximityPrompt") then
@@ -73,11 +81,9 @@ local function isTargetItem(object)
         return true
     end
 
-    -- กรองเฉพาะ BasePart ที่เป็นไอเทมหล่น (ไม่ดึงบล็อกฉากที่ Anchored)
     if object:IsA("BasePart") then
-        if object.Anchored then return false end -- ป้องกันการดึงบล็อกฉาก
-        if object.Size.Magnitude > 15 then return false end -- ป้องกัน Part ขนาดใหญ่
-        
+        if object.Anchored then return false end
+        if object.Size.Magnitude > 15 then return false end
         if object:FindFirstChildOfClass("TouchTransmitter") or object:IsA("MeshPart") then
             return true
         end
@@ -108,7 +114,10 @@ local function toggleESP(state)
     end
 end
 
--- ฟังก์ชันดึงไอเทมเข้าหาตัวละครแบบปลอดภัย
+-- ตารางเก็บ Cooldown ไอเทมที่เพิ่งดึงไป
+local pulledCache = {}
+
+-- ฟังก์ชันดึงไอเทมเข้าหาตัวละครแบบปลอดภัยสูงสุด
 local function pullItemToPlayer(desc)
     local character = LocalPlayer.Character
     local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -125,15 +134,37 @@ local function pullItemToPlayer(desc)
     end
 
     if targetPart and targetPart:IsA("BasePart") and not targetPart.Anchored then
-        -- ปิด CanCollide เพื่อไม่ให้ไอเทมดันตัวละครกระเด็น
+        -- 1. เช็คระยะห่าง ป้องกันเซิร์ฟเวอร์ดึงตัวละครวาป
+        local dist = (root.Position - targetPart.Position).Magnitude
+        if dist > MAX_PULL_DISTANCE then return end
+
+        -- 2. เช็ค Cooldown ป้องกันการดึงไอเทมชิ้นเดิมซ้ำๆ
+        local now = tick()
+        if pulledCache[targetPart] and (now - pulledCache[targetPart]) < 1.5 then
+            return
+        end
+        pulledCache[targetPart] = now
+
+        -- 3. ทำลาย Weld / Constraint ที่ยึดไอเทมไว้ก่อนย้าย CFrame
+        for _, child in ipairs(targetPart:GetChildren()) do
+            if child:IsA("Weld") or child:IsA("WeldConstraint") or child:IsA("Motor6D") or child:IsA("Snap") then
+                child:Destroy()
+            end
+        end
+
+        -- 4. ย้าย CFrame มาไว้ตรงหน้าตัวละคร
         targetPart.CanCollide = false
         targetPart.AssemblyLinearVelocity = Vector3.zero
-        
-        -- ย้ายไอเทมมาไว้ด้านหน้าตัวละคร 2 บล็อก ระดับอก
-        targetPart.CFrame = root.CFrame * CFrame.new(0, 0, -2)
+        targetPart.AssemblyAngularVelocity = Vector3.zero
+        targetPart.CFrame = root.CFrame * CFrame.new(0, 0, -2.5)
+
     elseif desc:IsA("ProximityPrompt") then
-        if fireproximityprompt then
-            fireproximityprompt(desc)
+        local parentPart = desc.Parent:IsA("BasePart") and desc.Parent or desc.Parent:FindFirstChildWhichIsA("BasePart", true)
+        if parentPart then
+            local dist = (root.Position - parentPart.Position).Magnitude
+            if dist <= MAX_PULL_DISTANCE and fireproximityprompt then
+                fireproximityprompt(desc)
+            end
         end
     end
 end
@@ -196,7 +227,7 @@ local TitleText = Instance.new("TextLabel")
 TitleText.Size = UDim2.new(0.7, 0, 1, 0)
 TitleText.Position = UDim2.new(0.05, 0, 0, 0)
 TitleText.BackgroundTransparency = 1
-TitleText.Text = "SnyX LITE v6.1 (SAFE PULL)"
+TitleText.Text = "SnyX LITE v6.2 (NO WARP)"
 TitleText.TextColor3 = Color3.fromRGB(255, 255, 255)
 TitleText.TextSize = 13
 TitleText.Font = Enum.Font.SourceSansBold
