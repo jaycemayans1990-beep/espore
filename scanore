@@ -29,8 +29,21 @@ cleanESP()
 -- [ CONFIG & LOGIC ]
 -- =========================================================
 local ESPEnabled = false
-local FILL_COLOR = Color3.fromRGB(255, 50, 50)
+local FILL_COLOR = Color3.fromRGB(255, 215, 0) -- สีทองสำหรับของหายาก/ราคาสูง
 local OUTLINE_COLOR = Color3.fromRGB(255, 255, 255)
+
+-- คีย์เวิร์ดระบุของหายากและราคาสูง (Rare & High Value Keywords)
+local RARE_KEYWORDS = {
+    "legendary", "mythic", "exotic", "secret", "divine", "celestial", "godly",
+    "diamond", "ruby", "emerald", "sapphire", "crystal", "void", "cosmic",
+    "ancient", "huge", "titanium", "gold", "plat", "obsidian", "rainbow",
+    "rare", "epic", "relic", "artifact", "chest", "gem"
+}
+
+-- คีย์เวิร์ดของทั่วไปที่ต้องการตัดออก (Common / Trash Keywords)
+local COMMON_KEYWORDS = {
+    "dirt", "stone", "rock", "coal", "copper", "iron", "sand", "gravel", "wood", "common"
+}
 
 -- ตรวจสอบว่าเป็น Character ของผู้เล่น
 local function isAnyPlayerCharacter(object)
@@ -56,43 +69,58 @@ local function isNPCorShop(object)
     return false
 end
 
--- ตรวจสอบวัตถุเป้าหมายแบบไม่จำกัดระยะ
-local function isTargetItem(object)
+-- ตรวจสอบว่าเป็นของราคาสูง/หายาก เท่านั้น
+local function isHighValueItem(object)
     if not object or not object.Parent then return false end
     if isAnyPlayerCharacter(object) then return false end
     if isNPCorShop(object) then return false end
-    
-    -- ProximityPrompt
-    if object:IsA("ProximityPrompt") then
-        local action = (object.ActionText .. " " .. object.ObjectText):lower()
-        if action:find("buy") or action:find("talk") or action:find("shop") or action:find("purchase") then
+
+    local name = object.Name:lower()
+    local parentName = object.Parent and object.Parent.Name:lower() or ""
+    local fullName = name .. " " .. parentName
+
+    -- ข้ามของระดับธรรมดา/ขยะ
+    for _, common in ipairs(COMMON_KEYWORDS) do
+        if name == common or parentName == common then
             return false
         end
-        return true
     end
 
-    -- Tool
-    if object:IsA("Tool") then
-        return true
-    end
-
-    -- BasePart / Ores / Gems / Items ทุกชนิดในแมพ
-    if object:IsA("BasePart") then
-        if object:FindFirstChildOfClass("TouchTransmitter") then
-            return true
-        end
-        local pName = object.Name:lower()
-        local parentName = object.Parent and object.Parent.Name:lower() or ""
-        if pName:find("ore") or pName:find("gem") or pName:find("mineral") or pName:find("item") or pName:find("drop")
-           or parentName:find("ore") or parentName:find("drop") or parentName:find("item") or parentName:find("mineral") then
+    -- 1. ตรวจสอบจาก Attribute / Value ในตัววัตถุ (ถ้ามี)
+    local rarityAttr = object:GetAttribute("Rarity") or object:GetAttribute("Value") or object:GetAttribute("Tier")
+    if rarityAttr then
+        local rStr = tostring(rarityAttr):lower()
+        if rStr:find("legend") or rStr:find("myth") or rStr:find("exic") or rStr:find("rare") or rStr:find("secret") then
             return true
         end
     end
-    
+
+    local valueObj = object:FindFirstChild("Value") or object:FindFirstChild("Rarity") or object:FindFirstChild("Price")
+    if valueObj and (valueObj:IsA("IntValue") or valueObj:IsA("NumberValue")) and valueObj.Value > 500 then
+        return true
+    end
+
+    -- 2. ตรวจสอบชื่อวัตถุตรงกับคีย์เวิร์ดของหายาก
+    for _, kw in ipairs(RARE_KEYWORDS) do
+        if fullName:find(kw) then
+            return true
+        end
+    end
+
+    -- 3. ตรวจสอบ ProximityPrompt ที่เป็นของหายาก
+    if object:IsA("ProximityPrompt") then
+        local action = (object.ActionText .. " " .. object.ObjectText):lower()
+        for _, kw in ipairs(RARE_KEYWORDS) do
+            if action:find(kw) then
+                return true
+            end
+        end
+    end
+
     return false
 end
 
--- แสดงผล Highlight อย่างเดียว
+-- แสดงผล Highlight สำหรับของหายากเท่านั้น
 local function applyESP(object)
     if not ESPEnabled then return end
     local target = object:IsA("Tool") and object or (object:IsA("BasePart") and object or object.Parent)
@@ -102,7 +130,7 @@ local function applyESP(object)
         local highlight = Instance.new("Highlight")
         highlight.Name = HIGHLIGHT_NAME
         highlight.FillColor = FILL_COLOR
-        highlight.FillTransparency = 0.4
+        highlight.FillTransparency = 0.3
         highlight.OutlineColor = OUTLINE_COLOR
         highlight.OutlineTransparency = 0
         highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
@@ -122,10 +150,10 @@ end
 -- =========================================================
 task.spawn(function()
     while true do
-        task.wait(0.3)
+        task.wait(0.4)
         if ESPEnabled then
             for _, desc in ipairs(Workspace:GetDescendants()) do
-                if isTargetItem(desc) then
+                if isHighValueItem(desc) then
                     applyESP(desc)
                 end
             end
@@ -164,8 +192,8 @@ local TitleText = Instance.new("TextLabel")
 TitleText.Size = UDim2.new(0.7, 0, 1, 0)
 TitleText.Position = UDim2.new(0.05, 0, 0, 0)
 TitleText.BackgroundTransparency = 1
-TitleText.Text = "SnyX LITE v7.1 (PURE HIGHLIGHT)"
-TitleText.TextColor3 = Color3.fromRGB(255, 255, 255)
+TitleText.Text = "SnyX LITE v7.2 (RARE ONLY)"
+TitleText.TextColor3 = Color3.fromRGB(255, 215, 0)
 TitleText.TextSize = 12
 TitleText.Font = Enum.Font.SourceSansBold
 TitleText.TextXAlignment = Enum.TextXAlignment.Left
@@ -189,7 +217,7 @@ local ToggleButton = Instance.new("TextButton")
 ToggleButton.Size = UDim2.new(0.9, 0, 0, 40)
 ToggleButton.Position = UDim2.new(0.05, 0, 0.12, 0)
 ToggleButton.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
-ToggleButton.Text = "ESP: OFF"
+ToggleButton.Text = "RARE ESP: OFF"
 ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 ToggleButton.Font = Enum.Font.SourceSansBold
 ToggleButton.TextSize = 14
@@ -209,7 +237,7 @@ UnloadButton.Parent = ContentFrame
 ToggleButton.MouseButton1Click:Connect(function()
     local newState = not ESPEnabled
     toggleESP(newState)
-    ToggleButton.Text = newState and "ESP: ON" or "ESP: OFF"
+    ToggleButton.Text = newState and "RARE ESP: ON" or "RARE ESP: OFF"
     ToggleButton.BackgroundColor3 = newState and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(150, 50, 50)
 end)
 
