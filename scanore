@@ -17,9 +17,10 @@ if oldUI then oldUI:Destroy() end
 
 local HIGHLIGHT_NAME = "SnyX_ItemHighlight"
 local function cleanHighlights()
-    for _, desc in ipairs(Workspace:GetChildren()) do
-        local hl = desc:FindFirstChild(HIGHLIGHT_NAME)
-        if hl then hl:Destroy() end
+    for _, desc in ipairs(Workspace:GetDescendants()) do
+        if desc.Name == HIGHLIGHT_NAME then
+            desc:Destroy()
+        end
     end
 end
 cleanHighlights()
@@ -31,10 +32,9 @@ local ESPEnabled = false
 local FILL_COLOR = Color3.fromRGB(255, 0, 0)
 local OUTLINE_COLOR = Color3.fromRGB(255, 255, 255)
 
--- ตรวจสอบเฉพาะไอเทมจริง ไม่สแกนพร่ำเพรื่อ
 local function checkAndApply(object)
     if not ESPEnabled then return end
-    if object:IsA("Tool") or object:FindFirstChildOfClass("TouchTransmitter") then
+    if object:IsA("Tool") or object:FindFirstChildWhichIsA("TouchTransmitter", true) then
         if not object:FindFirstChild(HIGHLIGHT_NAME) then
             local highlight = Instance.new("Highlight")
             highlight.Name = HIGHLIGHT_NAME
@@ -48,14 +48,12 @@ local function checkAndApply(object)
     end
 end
 
--- สแกนเฉพาะลูกชั้นแรก (ช่วยประหยัดแรมมือถือได้มหาศาล)
 local function toggleESP(state)
     ESPEnabled = state
     if state then
         for _, child in ipairs(Workspace:GetChildren()) do
             checkAndApply(child)
         end
-        -- ใช้ ChildAdded แทน DescendantAdded เพื่อป้องกัน RAM เครื่องระเบิด
         _G.SnyX_Connection = Workspace.ChildAdded:Connect(checkAndApply)
     else
         if _G.SnyX_Connection then
@@ -66,13 +64,13 @@ local function toggleESP(state)
     end
 end
 
--- Auto Collect Engine แบบมี Limit Rate ป้องกันเซิร์ฟเวอร์เตะ
 local function collectItem(object)
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not root then return end
 
-    local transmitter = object:FindFirstChildOfClass("TouchTransmitter") or (object:IsA("Tool") and object:FindFirstChild("Handle") and object.Handle:FindFirstChildOfClass("TouchTransmitter"))
-    if transmitter then
+    -- ค้นหา TouchTransmitter แบบเจาะลึกทุกชั้นโครงสร้าง
+    local transmitter = object:FindFirstChildWhichIsA("TouchTransmitter", true)
+    if transmitter and transmitter.Parent then
         local targetPart = transmitter.Parent
         if firetouchinterest then
             firetouchinterest(root, targetPart, 0)
@@ -84,12 +82,15 @@ local function collectItem(object)
     end
 end
 
+-- แก้ไข: ให้ลูปทำงานรอตลอดเวลา ไม่ break ทิ้งเมื่อกดปิด
 task.spawn(function()
-    while task.wait(0.5) do -- หน่วงเวลา 0.5 วิ ไม่ให้ CPU ค้าง
-        if not _G.SnyX_AutoCollect then break end
-        for _, child in ipairs(Workspace:GetChildren()) do
-            if child:FindFirstChild(HIGHLIGHT_NAME) or child:IsA("Tool") then
-                collectItem(child)
+    while true do
+        task.wait(0.5)
+        if _G.SnyX_AutoCollect then
+            for _, child in ipairs(Workspace:GetChildren()) do
+                if child:FindFirstChild(HIGHLIGHT_NAME) or child:IsA("Tool") or child:FindFirstChildWhichIsA("TouchTransmitter", true) then
+                    collectItem(child)
+                end
             end
         end
     end
@@ -147,7 +148,6 @@ ContentFrame.Position = UDim2.new(0, 0, 0, 30)
 ContentFrame.BackgroundTransparency = 1
 ContentFrame.Parent = MainFrame
 
--- ปุ่ม ESP
 local ToggleButton = Instance.new("TextButton")
 ToggleButton.Size = UDim2.new(0.9, 0, 0, 35)
 ToggleButton.Position = UDim2.new(0.05, 0, 0.1, 0)
@@ -156,7 +156,6 @@ ToggleButton.Text = "ESP: OFF"
 ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 ToggleButton.Parent = ContentFrame
 
--- ปุ่ม Auto-Collect
 local CollectButton = Instance.new("TextButton")
 CollectButton.Size = UDim2.new(0.9, 0, 0, 35)
 CollectButton.Position = UDim2.new(0.05, 0, 0.4, 0)
@@ -165,7 +164,6 @@ CollectButton.Text = "AUTO COLLECT: OFF"
 CollectButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 CollectButton.Parent = ContentFrame
 
--- ปุ่มปิดสคริปต์ถาวร เพื่อเปิดทางให้สคริปต์อื่น (Unload)
 local UnloadButton = Instance.new("TextButton")
 UnloadButton.Size = UDim2.new(0.9, 0, 0, 30)
 UnloadButton.Position = UDim2.new(0.05, 0, 0.72, 0)
@@ -190,15 +188,13 @@ CollectButton.MouseButton1Click:Connect(function()
     CollectButton.BackgroundColor3 = _G.SnyX_AutoCollect and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(150, 50, 50)
 end)
 
--- ปุ่มลบตัวตนออก คืนแรมให้ระบบก่อนรันตัวอื่น
 UnloadButton.MouseButton1Click:Connect(function()
     toggleESP(false)
     _G.SnyX_AutoCollect = false
     ScreenGui:Destroy()
-    print("[SnyX] ล้างหน่วยความจำเรียบร้อย รัน Infinite Yield ต่อได้เลยเพื่อนรัก!")
+    print("[SnyX] ล้างหน่วยความจำเรียบร้อย")
 end)
 
--- พับหน้าต่าง
 local IsCollapsed = false
 FoldButton.MouseButton1Click:Connect(function()
     IsCollapsed = not IsCollapsed
