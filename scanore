@@ -10,40 +10,34 @@ if _G.SnyX_Connection then
     _G.SnyX_Connection:Disconnect() 
     _G.SnyX_Connection = nil
 end
-_G.SnyX_AutoCollect = false
 
 local oldUI = LocalPlayer:WaitForChild("PlayerGui"):FindFirstChild("SnyX_ESP_GUI")
 if oldUI then oldUI:Destroy() end
 
 local HIGHLIGHT_NAME = "SnyX_ItemHighlight"
+local BILLBOARD_NAME = "SnyX_ItemBillboard"
 
-local function cleanHighlights()
+local function cleanESP()
     for _, desc in ipairs(Workspace:GetDescendants()) do
-        if desc.Name == HIGHLIGHT_NAME then
+        if desc.Name == HIGHLIGHT_NAME or desc.Name == BILLBOARD_NAME then
             desc:Destroy()
         end
     end
 end
-cleanHighlights()
+cleanESP()
 
 -- =========================================================
 -- [ CONFIG & LOGIC ]
 -- =========================================================
 local ESPEnabled = false
-local MAX_PULL_DISTANCE = 60 -- ระยะดูดสูงสุด (บล็อก) เพื่อป้องกันเซิร์ฟเวอร์ดึงตัวละครวาป
-local FILL_COLOR = Color3.fromRGB(255, 0, 0)
+local FILL_COLOR = Color3.fromRGB(255, 50, 50)
 local OUTLINE_COLOR = Color3.fromRGB(255, 255, 255)
 
--- ตรวจสอบว่าวัตถุอยู่ในตัวผู้เล่นคนใดคนหนึ่ง หรืออยู่ใน Backpack หรือไม่
-local function isInsideAnyCharacterOrBackpack(object)
-    if not object then return true end
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player.Character and object:IsDescendantOf(player.Character) then
-            return true
-        end
-        if player:FindFirstChild("Backpack") and object:IsDescendantOf(player.Backpack) then
-            return true
-        end
+-- ตรวจสอบว่าเป็น Character ของผู้เล่น
+local function isAnyPlayerCharacter(object)
+    local model = object:FindFirstAncestorOfClass("Model")
+    if model and Players:GetPlayerFromCharacter(model) then
+        return true
     end
     return false
 end
@@ -63,12 +57,13 @@ local function isNPCorShop(object)
     return false
 end
 
--- ตรวจสอบว่าเป็นไอเทมเป้าหมายที่อยู่บนพื้น
+-- ตรวจสอบวัตถุเป้าหมายแบบกว้าง (ESP Wide Filter)
 local function isTargetItem(object)
     if not object or not object.Parent then return false end
-    if isInsideAnyCharacterOrBackpack(object) then return false end
+    if isAnyPlayerCharacter(object) then return false end
     if isNPCorShop(object) then return false end
     
+    -- ตรวจจับ ProximityPrompt (ยกเว้นร้านค้า)
     if object:IsA("ProximityPrompt") then
         local action = (object.ActionText .. " " .. object.ObjectText):lower()
         if action:find("buy") or action:find("talk") or action:find("shop") or action:find("purchase") then
@@ -77,14 +72,20 @@ local function isTargetItem(object)
         return true
     end
 
+    -- ตรวจจับ Tool
     if object:IsA("Tool") then
         return true
     end
 
+    -- ตรวจจับ BasePart / MeshPart / Ores / Dropped Items
     if object:IsA("BasePart") then
-        if object.Anchored then return false end
-        if object.Size.Magnitude > 15 then return false end
-        if object:FindFirstChildOfClass("TouchTransmitter") or object:IsA("MeshPart") then
+        if object:FindFirstChildOfClass("TouchTransmitter") then
+            return true
+        end
+        local pName = object.Name:lower()
+        local parentName = object.Parent and object.Parent.Name:lower() or ""
+        if pName:find("ore") or pName:find("gem") or pName:find("mineral") or pName:find("item") or pName:find("drop")
+           or parentName:find("ore") or parentName:find("drop") or parentName:find("item") or parentName:find("mineral") then
             return true
         end
     end
@@ -92,80 +93,73 @@ local function isTargetItem(object)
     return false
 end
 
+-- แสดงผล ESP (Highlight + Billboard Label)
 local function applyESP(object)
     if not ESPEnabled then return end
     local target = object:IsA("Tool") and object or (object:IsA("BasePart") and object or object.Parent)
-    if target and target:IsA("PVInstance") and not target:FindFirstChild(HIGHLIGHT_NAME) then
+    if not target or not target:IsA("PVInstance") then return end
+
+    -- 1. สร้าง Highlight
+    if not target:FindFirstChild(HIGHLIGHT_NAME) then
         local highlight = Instance.new("Highlight")
         highlight.Name = HIGHLIGHT_NAME
         highlight.FillColor = FILL_COLOR
-        highlight.FillTransparency = 0.5
+        highlight.FillTransparency = 0.4
         highlight.OutlineColor = OUTLINE_COLOR
         highlight.OutlineTransparency = 0
         highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
         highlight.Parent = target
+    end
+
+    -- 2. สร้าง BillboardGui แสดงชื่อและระยะทาง
+    local primaryPart = target:IsA("Model") and (target.PrimaryPart or target:FindFirstChildWhichIsA("BasePart", true)) or (target:IsA("BasePart") and target or nil)
+    if primaryPart and not primaryPart:FindFirstChild(BILLBOARD_NAME) then
+        local bgui = Instance.new("BillboardGui")
+        bgui.Name = BILLBOARD_NAME
+        bgui.AlwaysOnTop = true
+        bgui.Size = UDim2.new(0, 160, 0, 30)
+        bgui.StudsOffset = Vector3.new(0, 2, 0)
+        bgui.Parent = primaryPart
+
+        local textLabel = Instance.new("TextLabel")
+        textLabel.Size = UDim2.new(1, 0, 1, 0)
+        textLabel.BackgroundTransparency = 1
+        textLabel.Text = target.Name
+        textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        textLabel.TextStrokeTransparency = 0
+        textLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        textLabel.TextSize = 12
+        textLabel.Font = Enum.Font.SourceSansBold
+        textLabel.Parent = bgui
+    end
+end
+
+-- อัปเดตระยะทางของ ESP
+local function updateESPDistances()
+    if not ESPEnabled then return end
+    local char = LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+
+    for _, desc in ipairs(Workspace:GetDescendants()) do
+        if desc.Name == BILLBOARD_NAME and desc:IsA("BillboardGui") then
+            local parentPart = desc.Parent
+            if parentPart and parentPart:IsA("BasePart") then
+                local dist = math.floor((root.Position - parentPart.Position).Magnitude)
+                local label = desc:FindFirstChildOfClass("TextLabel")
+                if label then
+                    local targetName = parentPart.Parent:IsA("Model") and parentPart.Parent.Name or parentPart.Name
+                    label.Text = string.format("%s [%dm]", targetName, dist)
+                end
+            end
+        end
     end
 end
 
 local function toggleESP(state)
     ESPEnabled = state
     if not state then
-        cleanHighlights()
-    end
-end
-
--- ตารางเก็บ Cooldown ไอเทมที่เพิ่งดึงไป
-local pulledCache = {}
-
--- ฟังก์ชันดึงไอเทมเข้าหาตัวละครแบบปลอดภัยสูงสุด
-local function pullItemToPlayer(desc)
-    local character = LocalPlayer.Character
-    local root = character and character:FindFirstChild("HumanoidRootPart")
-    if not root then return end
-
-    local targetPart = nil
-    
-    if desc:IsA("Tool") then
-        targetPart = desc:FindFirstChild("Handle") or desc:FindFirstChildWhichIsA("BasePart", true)
-    elseif desc:IsA("BasePart") and not desc.Anchored then
-        targetPart = desc
-    elseif desc:IsA("TouchTransmitter") and desc.Parent and desc.Parent:IsA("BasePart") and not desc.Parent.Anchored then
-        targetPart = desc.Parent
-    end
-
-    if targetPart and targetPart:IsA("BasePart") and not targetPart.Anchored then
-        -- 1. เช็คระยะห่าง ป้องกันเซิร์ฟเวอร์ดึงตัวละครวาป
-        local dist = (root.Position - targetPart.Position).Magnitude
-        if dist > MAX_PULL_DISTANCE then return end
-
-        -- 2. เช็ค Cooldown ป้องกันการดึงไอเทมชิ้นเดิมซ้ำๆ
-        local now = tick()
-        if pulledCache[targetPart] and (now - pulledCache[targetPart]) < 1.5 then
-            return
-        end
-        pulledCache[targetPart] = now
-
-        -- 3. ทำลาย Weld / Constraint ที่ยึดไอเทมไว้ก่อนย้าย CFrame
-        for _, child in ipairs(targetPart:GetChildren()) do
-            if child:IsA("Weld") or child:IsA("WeldConstraint") or child:IsA("Motor6D") or child:IsA("Snap") then
-                child:Destroy()
-            end
-        end
-
-        -- 4. ย้าย CFrame มาไว้ตรงหน้าตัวละคร
-        targetPart.CanCollide = false
-        targetPart.AssemblyLinearVelocity = Vector3.zero
-        targetPart.AssemblyAngularVelocity = Vector3.zero
-        targetPart.CFrame = root.CFrame * CFrame.new(0, 0, -2.5)
-
-    elseif desc:IsA("ProximityPrompt") then
-        local parentPart = desc.Parent:IsA("BasePart") and desc.Parent or desc.Parent:FindFirstChildWhichIsA("BasePart", true)
-        if parentPart then
-            local dist = (root.Position - parentPart.Position).Magnitude
-            if dist <= MAX_PULL_DISTANCE and fireproximityprompt then
-                fireproximityprompt(desc)
-            end
-        end
+        cleanESP()
     end
 end
 
@@ -174,24 +168,14 @@ end
 -- =========================================================
 task.spawn(function()
     while true do
-        task.wait(0.2)
-        local itemCount = 0
-        if ESPEnabled or _G.SnyX_AutoCollect then
+        task.wait(0.3)
+        if ESPEnabled then
             for _, desc in ipairs(Workspace:GetDescendants()) do
                 if isTargetItem(desc) then
-                    itemCount = itemCount + 1
-                    if ESPEnabled then
-                        applyESP(desc)
-                    end
-                    if _G.SnyX_AutoCollect then
-                        pullItemToPlayer(desc)
-                    end
+                    applyESP(desc)
                 end
             end
-        end
-        
-        if _G.SnyX_AutoCollect then
-            CollectButton.Text = "PULLING... (" .. tostring(itemCount) .. ")"
+            updateESPDistances()
         end
     end
 end)
@@ -205,7 +189,7 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 220, 0, 200)
+MainFrame.Size = UDim2.new(0, 220, 0, 150)
 MainFrame.Position = UDim2.new(0.1, 0, 0.4, 0)
 MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 MainFrame.BorderSizePixel = 0
@@ -227,7 +211,7 @@ local TitleText = Instance.new("TextLabel")
 TitleText.Size = UDim2.new(0.7, 0, 1, 0)
 TitleText.Position = UDim2.new(0.05, 0, 0, 0)
 TitleText.BackgroundTransparency = 1
-TitleText.Text = "SnyX LITE v6.2 (NO WARP)"
+TitleText.Text = "SnyX LITE v7.0 (ESP WIDE)"
 TitleText.TextColor3 = Color3.fromRGB(255, 255, 255)
 TitleText.TextSize = 13
 TitleText.Font = Enum.Font.SourceSansBold
@@ -249,24 +233,18 @@ ContentFrame.BackgroundTransparency = 1
 ContentFrame.Parent = MainFrame
 
 local ToggleButton = Instance.new("TextButton")
-ToggleButton.Size = UDim2.new(0.9, 0, 0, 35)
-ToggleButton.Position = UDim2.new(0.05, 0, 0.1, 0)
+ToggleButton.Size = UDim2.new(0.9, 0, 0, 40)
+ToggleButton.Position = UDim2.new(0.05, 0, 0.12, 0)
 ToggleButton.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
 ToggleButton.Text = "ESP: OFF"
 ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleButton.Font = Enum.Font.SourceSansBold
+ToggleButton.TextSize = 14
 ToggleButton.Parent = ContentFrame
 
-local CollectButton = Instance.new("TextButton")
-CollectButton.Size = UDim2.new(0.9, 0, 0, 35)
-CollectButton.Position = UDim2.new(0.05, 0, 0.4, 0)
-CollectButton.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
-CollectButton.Text = "AUTO COLLECT: OFF"
-CollectButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-CollectButton.Parent = ContentFrame
-
 local UnloadButton = Instance.new("TextButton")
-UnloadButton.Size = UDim2.new(0.9, 0, 0, 30)
-UnloadButton.Position = UDim2.new(0.05, 0, 0.72, 0)
+UnloadButton.Size = UDim2.new(0.9, 0, 0, 32)
+UnloadButton.Position = UDim2.new(0.05, 0, 0.58, 0)
 UnloadButton.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 UnloadButton.Text = "🔴 UNLOAD SCRIPT"
 UnloadButton.TextColor3 = Color3.fromRGB(255, 100, 100)
@@ -282,19 +260,8 @@ ToggleButton.MouseButton1Click:Connect(function()
     ToggleButton.BackgroundColor3 = newState and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(150, 50, 50)
 end)
 
-CollectButton.MouseButton1Click:Connect(function()
-    _G.SnyX_AutoCollect = not _G.SnyX_AutoCollect
-    if not _G.SnyX_AutoCollect then
-        CollectButton.Text = "AUTO COLLECT: OFF"
-        CollectButton.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
-    else
-        CollectButton.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
-    end
-end)
-
 UnloadButton.MouseButton1Click:Connect(function()
     toggleESP(false)
-    _G.SnyX_AutoCollect = false
     ScreenGui:Destroy()
 end)
 
@@ -302,5 +269,5 @@ local IsCollapsed = false
 FoldButton.MouseButton1Click:Connect(function()
     IsCollapsed = not IsCollapsed
     ContentFrame.Visible = not IsCollapsed
-    TweenService:Create(MainFrame, TweenInfo.new(0.15), {Size = IsCollapsed and UDim2.new(0, 220, 0, 30) or UDim2.new(0, 220, 0, 200)}):Play()
+    TweenService:Create(MainFrame, TweenInfo.new(0.15), {Size = IsCollapsed and UDim2.new(0, 220, 0, 30) or UDim2.new(0, 220, 0, 150)}):Play()
 end)
