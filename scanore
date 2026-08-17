@@ -15,11 +15,10 @@ local oldUI = LocalPlayer:WaitForChild("PlayerGui"):FindFirstChild("SnyX_ESP_GUI
 if oldUI then oldUI:Destroy() end
 
 local HIGHLIGHT_NAME = "SnyX_ItemHighlight"
-local BILLBOARD_NAME = "SnyX_ItemBillboard"
 
 local function cleanESP()
     for _, desc in ipairs(Workspace:GetDescendants()) do
-        if desc.Name == HIGHLIGHT_NAME or desc.Name == BILLBOARD_NAME then
+        if desc.Name == HIGHLIGHT_NAME then
             desc:Destroy()
         end
     end
@@ -57,13 +56,13 @@ local function isNPCorShop(object)
     return false
 end
 
--- ตรวจสอบวัตถุเป้าหมายแบบกว้าง (ESP Wide Filter)
+-- ตรวจสอบวัตถุเป้าหมายแบบไม่จำกัดระยะ
 local function isTargetItem(object)
     if not object or not object.Parent then return false end
     if isAnyPlayerCharacter(object) then return false end
     if isNPCorShop(object) then return false end
     
-    -- ตรวจจับ ProximityPrompt (ยกเว้นร้านค้า)
+    -- ProximityPrompt
     if object:IsA("ProximityPrompt") then
         local action = (object.ActionText .. " " .. object.ObjectText):lower()
         if action:find("buy") or action:find("talk") or action:find("shop") or action:find("purchase") then
@@ -72,12 +71,12 @@ local function isTargetItem(object)
         return true
     end
 
-    -- ตรวจจับ Tool
+    -- Tool
     if object:IsA("Tool") then
         return true
     end
 
-    -- ตรวจจับ BasePart / MeshPart / Ores / Dropped Items
+    -- BasePart / Ores / Gems / Items ทุกชนิดในแมพ
     if object:IsA("BasePart") then
         if object:FindFirstChildOfClass("TouchTransmitter") then
             return true
@@ -93,13 +92,12 @@ local function isTargetItem(object)
     return false
 end
 
--- แสดงผล ESP (Highlight + Billboard Label)
+-- แสดงผล Highlight อย่างเดียว
 local function applyESP(object)
     if not ESPEnabled then return end
     local target = object:IsA("Tool") and object or (object:IsA("BasePart") and object or object.Parent)
     if not target or not target:IsA("PVInstance") then return end
 
-    -- 1. สร้าง Highlight
     if not target:FindFirstChild(HIGHLIGHT_NAME) then
         local highlight = Instance.new("Highlight")
         highlight.Name = HIGHLIGHT_NAME
@@ -109,50 +107,6 @@ local function applyESP(object)
         highlight.OutlineTransparency = 0
         highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
         highlight.Parent = target
-    end
-
-    -- 2. สร้าง BillboardGui แสดงชื่อและระยะทาง
-    local primaryPart = target:IsA("Model") and (target.PrimaryPart or target:FindFirstChildWhichIsA("BasePart", true)) or (target:IsA("BasePart") and target or nil)
-    if primaryPart and not primaryPart:FindFirstChild(BILLBOARD_NAME) then
-        local bgui = Instance.new("BillboardGui")
-        bgui.Name = BILLBOARD_NAME
-        bgui.AlwaysOnTop = true
-        bgui.Size = UDim2.new(0, 160, 0, 30)
-        bgui.StudsOffset = Vector3.new(0, 2, 0)
-        bgui.Parent = primaryPart
-
-        local textLabel = Instance.new("TextLabel")
-        textLabel.Size = UDim2.new(1, 0, 1, 0)
-        textLabel.BackgroundTransparency = 1
-        textLabel.Text = target.Name
-        textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-        textLabel.TextStrokeTransparency = 0
-        textLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-        textLabel.TextSize = 12
-        textLabel.Font = Enum.Font.SourceSansBold
-        textLabel.Parent = bgui
-    end
-end
-
--- อัปเดตระยะทางของ ESP
-local function updateESPDistances()
-    if not ESPEnabled then return end
-    local char = LocalPlayer.Character
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    if not root then return end
-
-    for _, desc in ipairs(Workspace:GetDescendants()) do
-        if desc.Name == BILLBOARD_NAME and desc:IsA("BillboardGui") then
-            local parentPart = desc.Parent
-            if parentPart and parentPart:IsA("BasePart") then
-                local dist = math.floor((root.Position - parentPart.Position).Magnitude)
-                local label = desc:FindFirstChildOfClass("TextLabel")
-                if label then
-                    local targetName = parentPart.Parent:IsA("Model") and parentPart.Parent.Name or parentPart.Name
-                    label.Text = string.format("%s [%dm]", targetName, dist)
-                end
-            end
-        end
     end
 end
 
@@ -175,7 +129,6 @@ task.spawn(function()
                     applyESP(desc)
                 end
             end
-            updateESPDistances()
         end
     end
 end)
@@ -211,9 +164,9 @@ local TitleText = Instance.new("TextLabel")
 TitleText.Size = UDim2.new(0.7, 0, 1, 0)
 TitleText.Position = UDim2.new(0.05, 0, 0, 0)
 TitleText.BackgroundTransparency = 1
-TitleText.Text = "SnyX LITE v7.0 (ESP WIDE)"
+TitleText.Text = "SnyX LITE v7.1 (PURE HIGHLIGHT)"
 TitleText.TextColor3 = Color3.fromRGB(255, 255, 255)
-TitleText.TextSize = 13
+TitleText.TextSize = 12
 TitleText.Font = Enum.Font.SourceSansBold
 TitleText.TextXAlignment = Enum.TextXAlignment.Left
 TitleText.Parent = TitleBar
