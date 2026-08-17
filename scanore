@@ -30,29 +30,26 @@ cleanHighlights()
 -- [ CONFIG & LOGIC ]
 -- =========================================================
 local ESPEnabled = false
+local UseMagnetMode = true -- เปิดโหมดวาร์ปแตะไอเทมระยะสั้น (ช่วยแก้ปัญหาเซิร์ฟเวอร์ตรวจระยะทาง)
 local FILL_COLOR = Color3.fromRGB(255, 0, 0)
 local OUTLINE_COLOR = Color3.fromRGB(255, 255, 255)
 
--- ฟังก์ชันตรวจสอบว่าเป็น Character ของผู้เล่นคนใดคนหนึ่งหรือไม่
+-- เช็คว่าเป็นตัวละครของผู้เล่นอื่นหรือไม่
 local function isAnyPlayerCharacter(object)
     local model = object:FindFirstAncestorOfClass("Model")
-    if model then
-        if Players:GetPlayerFromCharacter(model) then
-            return true
-        end
+    if model and Players:GetPlayerFromCharacter(model) then
+        return true
     end
     return false
 end
 
--- ฟังก์ชันตรวจสอบว่าเป็น NPC หรือ Shop หรือไม่
+-- เช็คว่าเป็น NPC หรือร้านค้าหรือไม่
 local function isNPCorShop(object)
     local model = object:FindFirstAncestorOfClass("Model")
     if model then
-        -- ถ้าใน Model มี Humanoid แสดงว่าเป็น NPC หรือมอนสเตอร์
         if model:FindFirstChildOfClass("Humanoid") then
             return true
         end
-        -- เช็คชื่อโมเดลว่าเกี่ยวข้องกับ NPC หรือร้านค้าหรือไม่
         local lowerName = model.Name:lower()
         if lowerName:find("npc") or lowerName:find("shop") or lowerName:find("merchant") or lowerName:find("vendor") or lowerName:find("seller") then
             return true
@@ -61,20 +58,15 @@ local function isNPCorShop(object)
     return false
 end
 
--- ตรวจสอบเฉพาะไอเทมดรอปบนพื้นจริง
+-- ตรวจสอบไอเทมเป้าหมาย
 local function isTargetItem(object)
     if not object or not object.Parent then return false end
-    
-    -- กรองผู้เล่นทุกคนออก (ทั้งตัวเราและคนอื่น)
     if isAnyPlayerCharacter(object) then return false end
-    
-    -- กรอง NPC และร้านค้าออก
     if isNPCorShop(object) then return false end
     
-    -- เช็คประเภทของ ProximityPrompt (ข้ามพวกปุ่มคุย/ปุ่มซื้อของ)
     if object:IsA("ProximityPrompt") then
         local action = (object.ActionText .. " " .. object.ObjectText):lower()
-        if action:find("buy") or action:find("talk") or action:find("shop") or action:find("purchase") or action:find("open") then
+        if action:find("buy") or action:find("talk") or action:find("shop") or action:find("purchase") then
             return false
         end
         return true
@@ -110,52 +102,53 @@ local function toggleESP(state)
     end
 end
 
--- ระบบ Auto Collect ปลอดภัย ไม่ดึงของที่ติดกับฉาก/NPC
+-- ระบบเก็บไอเทมแบบทำงานขนาน (ไม่ค้างลูป)
 local function collectItem(desc)
     local character = LocalPlayer.Character
     local root = character and character:FindFirstChild("HumanoidRootPart")
     if not root then return end
 
-    if desc:IsA("TouchTransmitter") and desc.Parent then
-        local targetPart = desc.Parent
-        if firetouchinterest then
-            firetouchinterest(root, targetPart, 0)
-            task.wait(0.01)
-            firetouchinterest(root, targetPart, 1)
-        end
-    elseif desc:IsA("ProximityPrompt") then
-        if fireproximityprompt then
-            fireproximityprompt(desc)
-        end
-    elseif desc:IsA("Tool") and desc:FindFirstChild("Handle") then
-        local handle = desc.Handle
-        local transmitter = handle:FindFirstChildOfClass("TouchTransmitter")
-        if firetouchinterest and transmitter then
-            firetouchinterest(root, handle, 0)
-            task.wait(0.01)
-            firetouchinterest(root, handle, 1)
-        end
-    end
-end
+    task.spawn(function()
+        if desc:IsA("TouchTransmitter") and desc.Parent then
+            local targetPart = desc.Parent
+            
+            -- วิธีที่ 1: ใช้ firetouchinterest
+            if firetouchinterest then
+                firetouchinterest(root, targetPart, 0)
+                firetouchinterest(root, targetPart, 1)
+            end
+            
+            -- วิธีที่ 2: ถ้าเซิร์ฟเวอร์เช็คระยะทาง ใช้ Magnet วาร์ปไปแตะ 0.02 วิ
+            if UseMagnetMode and targetPart:IsA("BasePart") then
+                local oldCFrame = root.CFrame
+                root.CFrame = targetPart.CFrame
+                task.wait(0.02)
+                root.CFrame = oldCFrame
+            end
 
--- ลูปสแกนหลัก
-task.spawn(function()
-    while true do
-        task.wait(0.5)
-        if ESPEnabled or _G.SnyX_AutoCollect then
-            for _, desc in ipairs(Workspace:GetDescendants()) do
-                if isTargetItem(desc) then
-                    if ESPEnabled then
-                        applyESP(desc)
-                    end
-                    if _G.SnyX_AutoCollect then
-                        collectItem(desc)
-                    end
-                end
+        elseif desc:IsA("ProximityPrompt") then
+            if fireproximityprompt then
+                fireproximityprompt(desc)
+            end
+
+        elseif desc:IsA("Tool") and desc:FindFirstChild("Handle") then
+            local handle = desc.Handle
+            local transmitter = handle:FindFirstChildOfClass("TouchTransmitter")
+            
+            if firetouchinterest and transmitter then
+                firetouchinterest(root, handle, 0)
+                firetouchinterest(root, handle, 1)
+            end
+            
+            if UseMagnetMode then
+                local oldCFrame = root.CFrame
+                root.CFrame = handle.CFrame
+                task.wait(0.02)
+                root.CFrame = oldCFrame
             end
         end
-    end
-end)
+    end)
+end
 
 -- =========================================================
 -- [ UI CONSTRUCTION ]
@@ -188,7 +181,7 @@ local TitleText = Instance.new("TextLabel")
 TitleText.Size = UDim2.new(0.7, 0, 1, 0)
 TitleText.Position = UDim2.new(0.05, 0, 0, 0)
 TitleText.BackgroundTransparency = 1
-TitleText.Text = "SnyX LITE v4 (FIXED)"
+TitleText.Text = "SnyX LITE v5"
 TitleText.TextColor3 = Color3.fromRGB(255, 255, 255)
 TitleText.TextSize = 13
 TitleText.Font = Enum.Font.SourceSansBold
@@ -234,6 +227,34 @@ UnloadButton.TextColor3 = Color3.fromRGB(255, 100, 100)
 UnloadButton.Parent = ContentFrame
 
 -- =========================================================
+-- [ MAIN SCAN LOOP ]
+-- =========================================================
+task.spawn(function()
+    while true do
+        task.wait(0.3)
+        local itemCount = 0
+        if ESPEnabled or _G.SnyX_AutoCollect then
+            for _, desc in ipairs(Workspace:GetDescendants()) do
+                if isTargetItem(desc) then
+                    itemCount = itemCount + 1
+                    if ESPEnabled then
+                        applyESP(desc)
+                    end
+                    if _G.SnyX_AutoCollect then
+                        collectItem(desc)
+                    end
+                end
+            end
+        end
+        
+        -- อัปเดตข้อความแสดงจำนวนไอเทมที่ตรวจพบ
+        if _G.SnyX_AutoCollect then
+            CollectButton.Text = "COLLECTING... (" .. tostring(itemCount) .. ")"
+        end
+    end
+end)
+
+-- =========================================================
 -- [ UI INTERACTION ]
 -- =========================================================
 ToggleButton.MouseButton1Click:Connect(function()
@@ -245,8 +266,12 @@ end)
 
 CollectButton.MouseButton1Click:Connect(function()
     _G.SnyX_AutoCollect = not _G.SnyX_AutoCollect
-    CollectButton.Text = _G.SnyX_AutoCollect and "AUTO COLLECT: ON" or "AUTO COLLECT: OFF"
-    CollectButton.BackgroundColor3 = _G.SnyX_AutoCollect and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(150, 50, 50)
+    if not _G.SnyX_AutoCollect then
+        CollectButton.Text = "AUTO COLLECT: OFF"
+        CollectButton.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+    else
+        CollectButton.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+    end
 end)
 
 UnloadButton.MouseButton1Click:Connect(function()
