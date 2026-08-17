@@ -4,7 +4,7 @@ local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
 
 -- =========================================================
--- [ SYSTEM CLEANUP ] ล้างระบบเก่าที่ค้างอยู่ในแรมก่อนรันใหม่
+-- [ SYSTEM CLEANUP ]
 -- =========================================================
 if _G.SnyX_Connection then 
     _G.SnyX_Connection:Disconnect() 
@@ -16,6 +16,7 @@ local oldUI = LocalPlayer:WaitForChild("PlayerGui"):FindFirstChild("SnyX_ESP_GUI
 if oldUI then oldUI:Destroy() end
 
 local HIGHLIGHT_NAME = "SnyX_ItemHighlight"
+
 local function cleanHighlights()
     for _, desc in ipairs(Workspace:GetDescendants()) do
         if desc.Name == HIGHLIGHT_NAME then
@@ -32,64 +33,87 @@ local ESPEnabled = false
 local FILL_COLOR = Color3.fromRGB(255, 0, 0)
 local OUTLINE_COLOR = Color3.fromRGB(255, 255, 255)
 
-local function checkAndApply(object)
+-- ตรวจสอบว่าเป็นไอเทมในเกม (และข้ามตัวละครผู้เล่นเอง)
+local function isTargetItem(object)
+    if not object or not object.Parent then return false end
+    if LocalPlayer.Character and object:IsDescendantOf(LocalPlayer.Character) then return false end
+    
+    if object:IsA("Tool") or object:IsA("TouchTransmitter") or object:IsA("ProximityPrompt") then
+        return true
+    end
+    return false
+end
+
+-- แสดงผล ESP
+local function applyESP(object)
     if not ESPEnabled then return end
-    if object:IsA("Tool") or object:FindFirstChildWhichIsA("TouchTransmitter", true) then
-        if not object:FindFirstChild(HIGHLIGHT_NAME) then
-            local highlight = Instance.new("Highlight")
-            highlight.Name = HIGHLIGHT_NAME
-            highlight.FillColor = FILL_COLOR
-            highlight.FillTransparency = 0.5
-            highlight.OutlineColor = OUTLINE_COLOR
-            highlight.OutlineTransparency = 0
-            highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-            highlight.Parent = object
-        end
+    local target = object:IsA("Tool") and object or object.Parent
+    if target and target:IsA("PVInstance") and not target:FindFirstChild(HIGHLIGHT_NAME) then
+        if LocalPlayer.Character and target:IsDescendantOf(LocalPlayer.Character) then return end
+        
+        local highlight = Instance.new("Highlight")
+        highlight.Name = HIGHLIGHT_NAME
+        highlight.FillColor = FILL_COLOR
+        highlight.FillTransparency = 0.5
+        highlight.OutlineColor = OUTLINE_COLOR
+        highlight.OutlineTransparency = 0
+        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        highlight.Parent = target
     end
 end
 
 local function toggleESP(state)
     ESPEnabled = state
-    if state then
-        for _, child in ipairs(Workspace:GetChildren()) do
-            checkAndApply(child)
-        end
-        _G.SnyX_Connection = Workspace.ChildAdded:Connect(checkAndApply)
-    else
-        if _G.SnyX_Connection then
-            _G.SnyX_Connection:Disconnect()
-            _G.SnyX_Connection = nil
-        end
+    if not state then
         cleanHighlights()
     end
 end
 
-local function collectItem(object)
-    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+-- ระบบ Auto Collect รองรับทั้ง Touch และ ProximityPrompt
+local function collectItem(desc)
+    local character = LocalPlayer.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
     if not root then return end
 
-    -- ค้นหา TouchTransmitter แบบเจาะลึกทุกชั้นโครงสร้าง
-    local transmitter = object:FindFirstChildWhichIsA("TouchTransmitter", true)
-    if transmitter and transmitter.Parent then
-        local targetPart = transmitter.Parent
+    if desc:IsA("TouchTransmitter") and desc.Parent then
+        local targetPart = desc.Parent
         if firetouchinterest then
             firetouchinterest(root, targetPart, 0)
-            task.wait(0.02)
+            task.wait(0.01)
             firetouchinterest(root, targetPart, 1)
         else
             targetPart.CFrame = root.CFrame
         end
+    elseif desc:IsA("ProximityPrompt") then
+        if fireproximityprompt then
+            fireproximityprompt(desc)
+        end
+    elseif desc:IsA("Tool") and desc:FindFirstChild("Handle") then
+        local handle = desc.Handle
+        local transmitter = handle:FindFirstChildOfClass("TouchTransmitter")
+        if firetouchinterest and transmitter then
+            firetouchinterest(root, handle, 0)
+            task.wait(0.01)
+            firetouchinterest(root, handle, 1)
+        else
+            handle.CFrame = root.CFrame
+        end
     end
 end
 
--- แก้ไข: ให้ลูปทำงานรอตลอดเวลา ไม่ break ทิ้งเมื่อกดปิด
+-- ลูปสแกนหลักแบบเจาะลึกทุกระดับชั้น (GetDescendants)
 task.spawn(function()
     while true do
         task.wait(0.5)
-        if _G.SnyX_AutoCollect then
-            for _, child in ipairs(Workspace:GetChildren()) do
-                if child:FindFirstChild(HIGHLIGHT_NAME) or child:IsA("Tool") or child:FindFirstChildWhichIsA("TouchTransmitter", true) then
-                    collectItem(child)
+        if ESPEnabled or _G.SnyX_AutoCollect then
+            for _, desc in ipairs(Workspace:GetDescendants()) do
+                if isTargetItem(desc) then
+                    if ESPEnabled then
+                        applyESP(desc)
+                    end
+                    if _G.SnyX_AutoCollect then
+                        collectItem(desc)
+                    end
                 end
             end
         end
@@ -127,7 +151,7 @@ local TitleText = Instance.new("TextLabel")
 TitleText.Size = UDim2.new(0.7, 0, 1, 0)
 TitleText.Position = UDim2.new(0.05, 0, 0, 0)
 TitleText.BackgroundTransparency = 1
-TitleText.Text = "SnyX LITE v2"
+TitleText.Text = "SnyX LITE v3"
 TitleText.TextColor3 = Color3.fromRGB(255, 255, 255)
 TitleText.TextSize = 13
 TitleText.Font = Enum.Font.SourceSansBold
@@ -192,7 +216,6 @@ UnloadButton.MouseButton1Click:Connect(function()
     toggleESP(false)
     _G.SnyX_AutoCollect = false
     ScreenGui:Destroy()
-    print("[SnyX] ล้างหน่วยความจำเรียบร้อย")
 end)
 
 local IsCollapsed = false
