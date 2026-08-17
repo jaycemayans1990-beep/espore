@@ -30,11 +30,10 @@ cleanHighlights()
 -- [ CONFIG & LOGIC ]
 -- =========================================================
 local ESPEnabled = false
-local UseMagnetMode = true -- เปิดโหมดวาร์ปแตะไอเทมระยะสั้น (ช่วยแก้ปัญหาเซิร์ฟเวอร์ตรวจระยะทาง)
 local FILL_COLOR = Color3.fromRGB(255, 0, 0)
 local OUTLINE_COLOR = Color3.fromRGB(255, 255, 255)
 
--- เช็คว่าเป็นตัวละครของผู้เล่นอื่นหรือไม่
+-- ตรวจสอบว่าเป็น Character ของผู้เล่นคนอื่นหรือไม่
 local function isAnyPlayerCharacter(object)
     local model = object:FindFirstAncestorOfClass("Model")
     if model and Players:GetPlayerFromCharacter(model) then
@@ -43,7 +42,7 @@ local function isAnyPlayerCharacter(object)
     return false
 end
 
--- เช็คว่าเป็น NPC หรือร้านค้าหรือไม่
+-- ตรวจสอบว่าเป็น NPC หรือร้านค้าหรือไม่
 local function isNPCorShop(object)
     local model = object:FindFirstAncestorOfClass("Model")
     if model then
@@ -102,53 +101,67 @@ local function toggleESP(state)
     end
 end
 
--- ระบบเก็บไอเทมแบบทำงานขนาน (ไม่ค้างลูป)
-local function collectItem(desc)
+-- ระบบดูดไอเทมมาหาตำแหน่งตัวละคร (Item Vacuum Engine)
+local function pullItemToPlayer(desc)
     local character = LocalPlayer.Character
     local root = character and character:FindFirstChild("HumanoidRootPart")
     if not root then return end
 
-    task.spawn(function()
-        if desc:IsA("TouchTransmitter") and desc.Parent then
-            local targetPart = desc.Parent
-            
-            -- วิธีที่ 1: ใช้ firetouchinterest
-            if firetouchinterest then
-                firetouchinterest(root, targetPart, 0)
-                firetouchinterest(root, targetPart, 1)
-            end
-            
-            -- วิธีที่ 2: ถ้าเซิร์ฟเวอร์เช็คระยะทาง ใช้ Magnet วาร์ปไปแตะ 0.02 วิ
-            if UseMagnetMode and targetPart:IsA("BasePart") then
-                local oldCFrame = root.CFrame
-                root.CFrame = targetPart.CFrame
-                task.wait(0.02)
-                root.CFrame = oldCFrame
-            end
+    local targetPart = nil
+    
+    -- หา Part หลักของไอเทม
+    if desc:IsA("TouchTransmitter") and desc.Parent and desc.Parent:IsA("BasePart") then
+        targetPart = desc.Parent
+    elseif desc:IsA("Tool") then
+        targetPart = desc:FindFirstChild("Handle") or desc:FindFirstChildWhichIsA("BasePart", true)
+    elseif desc:IsA("BasePart") and desc:FindFirstChildOfClass("TouchTransmitter") then
+        targetPart = desc
+    end
 
-        elseif desc:IsA("ProximityPrompt") then
-            if fireproximityprompt then
-                fireproximityprompt(desc)
-            end
+    -- ดึงไอเทมย้าย CFrame มาหาตำแหน่งผู้เล่นทันที
+    if targetPart and targetPart:IsA("BasePart") then
+        -- ย้ายมาตำแหน่งตัวละคร (สูงกว่าเท้า 1.5 บล็อก เพื่อป้องกันไอเทมดันตัวเราติดพื้น)
+        targetPart.CFrame = root.CFrame * CFrame.new(0, 1.5, 0)
+        targetPart.AssemblyLinearVelocity = Vector3.zero -- รีเซ็ตแรงเฉื่อยไอเทม
+        
+        -- ส่งสัญญาณแตะเพื่อความชัวร์
+        if firetouchinterest then
+            firetouchinterest(root, targetPart, 0)
+            firetouchinterest(root, targetPart, 1)
+        end
+    elseif desc:IsA("ProximityPrompt") then
+        if fireproximityprompt then
+            fireproximityprompt(desc)
+        end
+    end
+end
 
-        elseif desc:IsA("Tool") and desc:FindFirstChild("Handle") then
-            local handle = desc.Handle
-            local transmitter = handle:FindFirstChildOfClass("TouchTransmitter")
-            
-            if firetouchinterest and transmitter then
-                firetouchinterest(root, handle, 0)
-                firetouchinterest(root, handle, 1)
-            end
-            
-            if UseMagnetMode then
-                local oldCFrame = root.CFrame
-                root.CFrame = handle.CFrame
-                task.wait(0.02)
-                root.CFrame = oldCFrame
+-- =========================================================
+-- [ MAIN SCAN LOOP ]
+-- =========================================================
+task.spawn(function()
+    while true do
+        task.wait(0.2) -- ความเร็วสแกน 0.2 วิ (ดูดไอเทมทันใจ)
+        local itemCount = 0
+        if ESPEnabled or _G.SnyX_AutoCollect then
+            for _, desc in ipairs(Workspace:GetDescendants()) do
+                if isTargetItem(desc) then
+                    itemCount = itemCount + 1
+                    if ESPEnabled then
+                        applyESP(desc)
+                    end
+                    if _G.SnyX_AutoCollect then
+                        pullItemToPlayer(desc)
+                    end
+                end
             end
         end
-    end)
-end
+        
+        if _G.SnyX_AutoCollect then
+            CollectButton.Text = "PULLING... (" .. tostring(itemCount) .. ")"
+        end
+    end
+end)
 
 -- =========================================================
 -- [ UI CONSTRUCTION ]
@@ -181,7 +194,7 @@ local TitleText = Instance.new("TextLabel")
 TitleText.Size = UDim2.new(0.7, 0, 1, 0)
 TitleText.Position = UDim2.new(0.05, 0, 0, 0)
 TitleText.BackgroundTransparency = 1
-TitleText.Text = "SnyX LITE v5"
+TitleText.Text = "SnyX LITE v6 (VACUUM)"
 TitleText.TextColor3 = Color3.fromRGB(255, 255, 255)
 TitleText.TextSize = 13
 TitleText.Font = Enum.Font.SourceSansBold
@@ -225,34 +238,6 @@ UnloadButton.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 UnloadButton.Text = "🔴 UNLOAD SCRIPT"
 UnloadButton.TextColor3 = Color3.fromRGB(255, 100, 100)
 UnloadButton.Parent = ContentFrame
-
--- =========================================================
--- [ MAIN SCAN LOOP ]
--- =========================================================
-task.spawn(function()
-    while true do
-        task.wait(0.3)
-        local itemCount = 0
-        if ESPEnabled or _G.SnyX_AutoCollect then
-            for _, desc in ipairs(Workspace:GetDescendants()) do
-                if isTargetItem(desc) then
-                    itemCount = itemCount + 1
-                    if ESPEnabled then
-                        applyESP(desc)
-                    end
-                    if _G.SnyX_AutoCollect then
-                        collectItem(desc)
-                    end
-                end
-            end
-        end
-        
-        -- อัปเดตข้อความแสดงจำนวนไอเทมที่ตรวจพบ
-        if _G.SnyX_AutoCollect then
-            CollectButton.Text = "COLLECTING... (" .. tostring(itemCount) .. ")"
-        end
-    end
-end)
 
 -- =========================================================
 -- [ UI INTERACTION ]
