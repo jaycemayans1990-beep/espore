@@ -33,14 +33,57 @@ local ESPEnabled = false
 local FILL_COLOR = Color3.fromRGB(255, 0, 0)
 local OUTLINE_COLOR = Color3.fromRGB(255, 255, 255)
 
--- ตรวจสอบว่าเป็นไอเทมในเกม (และข้ามตัวละครผู้เล่นเอง)
+-- ฟังก์ชันตรวจสอบว่าเป็น Character ของผู้เล่นคนใดคนหนึ่งหรือไม่
+local function isAnyPlayerCharacter(object)
+    local model = object:FindFirstAncestorOfClass("Model")
+    if model then
+        if Players:GetPlayerFromCharacter(model) then
+            return true
+        end
+    end
+    return false
+end
+
+-- ฟังก์ชันตรวจสอบว่าเป็น NPC หรือ Shop หรือไม่
+local function isNPCorShop(object)
+    local model = object:FindFirstAncestorOfClass("Model")
+    if model then
+        -- ถ้าใน Model มี Humanoid แสดงว่าเป็น NPC หรือมอนสเตอร์
+        if model:FindFirstChildOfClass("Humanoid") then
+            return true
+        end
+        -- เช็คชื่อโมเดลว่าเกี่ยวข้องกับ NPC หรือร้านค้าหรือไม่
+        local lowerName = model.Name:lower()
+        if lowerName:find("npc") or lowerName:find("shop") or lowerName:find("merchant") or lowerName:find("vendor") or lowerName:find("seller") then
+            return true
+        end
+    end
+    return false
+end
+
+-- ตรวจสอบเฉพาะไอเทมดรอปบนพื้นจริง
 local function isTargetItem(object)
     if not object or not object.Parent then return false end
-    if LocalPlayer.Character and object:IsDescendantOf(LocalPlayer.Character) then return false end
     
-    if object:IsA("Tool") or object:IsA("TouchTransmitter") or object:IsA("ProximityPrompt") then
+    -- กรองผู้เล่นทุกคนออก (ทั้งตัวเราและคนอื่น)
+    if isAnyPlayerCharacter(object) then return false end
+    
+    -- กรอง NPC และร้านค้าออก
+    if isNPCorShop(object) then return false end
+    
+    -- เช็คประเภทของ ProximityPrompt (ข้ามพวกปุ่มคุย/ปุ่มซื้อของ)
+    if object:IsA("ProximityPrompt") then
+        local action = (object.ActionText .. " " .. object.ObjectText):lower()
+        if action:find("buy") or action:find("talk") or action:find("shop") or action:find("purchase") or action:find("open") then
+            return false
+        end
         return true
     end
+
+    if object:IsA("Tool") or object:IsA("TouchTransmitter") then
+        return true
+    end
+    
     return false
 end
 
@@ -49,8 +92,6 @@ local function applyESP(object)
     if not ESPEnabled then return end
     local target = object:IsA("Tool") and object or object.Parent
     if target and target:IsA("PVInstance") and not target:FindFirstChild(HIGHLIGHT_NAME) then
-        if LocalPlayer.Character and target:IsDescendantOf(LocalPlayer.Character) then return end
-        
         local highlight = Instance.new("Highlight")
         highlight.Name = HIGHLIGHT_NAME
         highlight.FillColor = FILL_COLOR
@@ -69,7 +110,7 @@ local function toggleESP(state)
     end
 end
 
--- ระบบ Auto Collect รองรับทั้ง Touch และ ProximityPrompt
+-- ระบบ Auto Collect ปลอดภัย ไม่ดึงของที่ติดกับฉาก/NPC
 local function collectItem(desc)
     local character = LocalPlayer.Character
     local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -81,8 +122,6 @@ local function collectItem(desc)
             firetouchinterest(root, targetPart, 0)
             task.wait(0.01)
             firetouchinterest(root, targetPart, 1)
-        else
-            targetPart.CFrame = root.CFrame
         end
     elseif desc:IsA("ProximityPrompt") then
         if fireproximityprompt then
@@ -95,13 +134,11 @@ local function collectItem(desc)
             firetouchinterest(root, handle, 0)
             task.wait(0.01)
             firetouchinterest(root, handle, 1)
-        else
-            handle.CFrame = root.CFrame
         end
     end
 end
 
--- ลูปสแกนหลักแบบเจาะลึกทุกระดับชั้น (GetDescendants)
+-- ลูปสแกนหลัก
 task.spawn(function()
     while true do
         task.wait(0.5)
@@ -151,7 +188,7 @@ local TitleText = Instance.new("TextLabel")
 TitleText.Size = UDim2.new(0.7, 0, 1, 0)
 TitleText.Position = UDim2.new(0.05, 0, 0, 0)
 TitleText.BackgroundTransparency = 1
-TitleText.Text = "SnyX LITE v3"
+TitleText.Text = "SnyX LITE v4 (FIXED)"
 TitleText.TextColor3 = Color3.fromRGB(255, 255, 255)
 TitleText.TextSize = 13
 TitleText.Font = Enum.Font.SourceSansBold
