@@ -33,7 +33,6 @@ local ESPEnabled = false
 local FILL_COLOR = Color3.fromRGB(255, 0, 0)
 local OUTLINE_COLOR = Color3.fromRGB(255, 255, 255)
 
--- ตรวจสอบว่าเป็น Character ของผู้เล่นคนอื่นหรือไม่
 local function isAnyPlayerCharacter(object)
     local model = object:FindFirstAncestorOfClass("Model")
     if model and Players:GetPlayerFromCharacter(model) then
@@ -42,7 +41,6 @@ local function isAnyPlayerCharacter(object)
     return false
 end
 
--- ตรวจสอบว่าเป็น NPC หรือร้านค้าหรือไม่
 local function isNPCorShop(object)
     local model = object:FindFirstAncestorOfClass("Model")
     if model then
@@ -57,7 +55,7 @@ local function isNPCorShop(object)
     return false
 end
 
--- ตรวจสอบไอเทมเป้าหมาย
+-- ตรวจสอบว่าเป็นไอเทมที่หล่นอยู่จริง
 local function isTargetItem(object)
     if not object or not object.Parent then return false end
     if isAnyPlayerCharacter(object) then return false end
@@ -71,17 +69,26 @@ local function isTargetItem(object)
         return true
     end
 
-    if object:IsA("Tool") or object:IsA("TouchTransmitter") then
+    if object:IsA("Tool") then
         return true
+    end
+
+    -- กรองเฉพาะ BasePart ที่เป็นไอเทมหล่น (ไม่ดึงบล็อกฉากที่ Anchored)
+    if object:IsA("BasePart") then
+        if object.Anchored then return false end -- ป้องกันการดึงบล็อกฉาก
+        if object.Size.Magnitude > 15 then return false end -- ป้องกัน Part ขนาดใหญ่
+        
+        if object:FindFirstChildOfClass("TouchTransmitter") or object:IsA("MeshPart") then
+            return true
+        end
     end
     
     return false
 end
 
--- แสดงผล ESP
 local function applyESP(object)
     if not ESPEnabled then return end
-    local target = object:IsA("Tool") and object or object.Parent
+    local target = object:IsA("Tool") and object or (object:IsA("BasePart") and object or object.Parent)
     if target and target:IsA("PVInstance") and not target:FindFirstChild(HIGHLIGHT_NAME) then
         local highlight = Instance.new("Highlight")
         highlight.Name = HIGHLIGHT_NAME
@@ -101,7 +108,7 @@ local function toggleESP(state)
     end
 end
 
--- ระบบดูดไอเทมมาหาตำแหน่งตัวละคร (Item Vacuum Engine)
+-- ฟังก์ชันดึงไอเทมเข้าหาตัวละครแบบปลอดภัย
 local function pullItemToPlayer(desc)
     local character = LocalPlayer.Character
     local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -109,26 +116,21 @@ local function pullItemToPlayer(desc)
 
     local targetPart = nil
     
-    -- หา Part หลักของไอเทม
-    if desc:IsA("TouchTransmitter") and desc.Parent and desc.Parent:IsA("BasePart") then
-        targetPart = desc.Parent
-    elseif desc:IsA("Tool") then
+    if desc:IsA("Tool") then
         targetPart = desc:FindFirstChild("Handle") or desc:FindFirstChildWhichIsA("BasePart", true)
-    elseif desc:IsA("BasePart") and desc:FindFirstChildOfClass("TouchTransmitter") then
+    elseif desc:IsA("BasePart") and not desc.Anchored then
         targetPart = desc
+    elseif desc:IsA("TouchTransmitter") and desc.Parent and desc.Parent:IsA("BasePart") and not desc.Parent.Anchored then
+        targetPart = desc.Parent
     end
 
-    -- ดึงไอเทมย้าย CFrame มาหาตำแหน่งผู้เล่นทันที
-    if targetPart and targetPart:IsA("BasePart") then
-        -- ย้ายมาตำแหน่งตัวละคร (สูงกว่าเท้า 1.5 บล็อก เพื่อป้องกันไอเทมดันตัวเราติดพื้น)
-        targetPart.CFrame = root.CFrame * CFrame.new(0, 1.5, 0)
-        targetPart.AssemblyLinearVelocity = Vector3.zero -- รีเซ็ตแรงเฉื่อยไอเทม
+    if targetPart and targetPart:IsA("BasePart") and not targetPart.Anchored then
+        -- ปิด CanCollide เพื่อไม่ให้ไอเทมดันตัวละครกระเด็น
+        targetPart.CanCollide = false
+        targetPart.AssemblyLinearVelocity = Vector3.zero
         
-        -- ส่งสัญญาณแตะเพื่อความชัวร์
-        if firetouchinterest then
-            firetouchinterest(root, targetPart, 0)
-            firetouchinterest(root, targetPart, 1)
-        end
+        -- ย้ายไอเทมมาไว้ด้านหน้าตัวละคร 2 บล็อก ระดับอก
+        targetPart.CFrame = root.CFrame * CFrame.new(0, 0, -2)
     elseif desc:IsA("ProximityPrompt") then
         if fireproximityprompt then
             fireproximityprompt(desc)
@@ -141,7 +143,7 @@ end
 -- =========================================================
 task.spawn(function()
     while true do
-        task.wait(0.2) -- ความเร็วสแกน 0.2 วิ (ดูดไอเทมทันใจ)
+        task.wait(0.2)
         local itemCount = 0
         if ESPEnabled or _G.SnyX_AutoCollect then
             for _, desc in ipairs(Workspace:GetDescendants()) do
@@ -194,7 +196,7 @@ local TitleText = Instance.new("TextLabel")
 TitleText.Size = UDim2.new(0.7, 0, 1, 0)
 TitleText.Position = UDim2.new(0.05, 0, 0, 0)
 TitleText.BackgroundTransparency = 1
-TitleText.Text = "SnyX LITE v6 (VACUUM)"
+TitleText.Text = "SnyX LITE v6.1 (SAFE PULL)"
 TitleText.TextColor3 = Color3.fromRGB(255, 255, 255)
 TitleText.TextSize = 13
 TitleText.Font = Enum.Font.SourceSansBold
